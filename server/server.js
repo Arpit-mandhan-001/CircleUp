@@ -117,6 +117,7 @@ import express from 'express';
 import cors from 'cors';
 import admin from 'firebase-admin';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 
 import connectDB from './configs/db.js';
 
@@ -125,21 +126,56 @@ import postRoutes from './routes/post.js';
 
 dotenv.config();
 
-// Initialize Firebase Admin
-const serviceAccount = {
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-  clientId: process.env.FIREBASE_CLIENT_ID,
-  auth_uri: 'https://accounts.google.com/o/oauth2/auth',
-  token_uri: 'https://oauth2.googleapis.com/token',
-  auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs',
-  client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL,
-};
+// Check if we're in development mode
+const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV;
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
+// Validate required environment variables
+const requiredEnvVars = ['MONGODB_URI'];
+
+// Only require Firebase vars in production
+if (!isDevelopment) {
+  requiredEnvVars.push(
+    'FIREBASE_PROJECT_ID',
+    'FIREBASE_PRIVATE_KEY',
+    'FIREBASE_CLIENT_EMAIL',
+    'FIREBASE_CLIENT_ID',
+    'FIREBASE_CLIENT_CERT_URL'
+  );
+}
+
+const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+
+if (missingEnvVars.length > 0) {
+  console.error('Missing required environment variables:', missingEnvVars);
+  console.error('Please create a .env file with the required variables');
+  process.exit(1);
+}
+
+// Initialize Firebase Admin only if not in development mode
+if (!isDevelopment) {
+  try {
+    const serviceAccount = {
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      clientId: process.env.FIREBASE_CLIENT_ID,
+      auth_uri: 'https://accounts.google.com/o/oauth2/auth',
+      token_uri: 'https://oauth2.googleapis.com/token',
+      auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs',
+      client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL,
+    };
+
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
+    console.log('Firebase Admin initialized successfully');
+  } catch (error) {
+    console.error('Failed to initialize Firebase Admin:', error.message);
+    process.exit(1);
+  }
+} else {
+  console.log('Running in development mode - Firebase Admin disabled');
+}
 
 connectDB();
 
@@ -147,6 +183,16 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    message: 'Server is running',
+    environment: process.env.NODE_ENV || 'development',
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+  });
+});
 
 // Routes
 app.use('/users', userRoutes);
